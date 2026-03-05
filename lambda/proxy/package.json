@@ -1,0 +1,9 @@
+{
+  "name": "gossip-girl-proxy",
+  "version": "1.0.0",
+  "private": true,
+  "description": "API Gateway proxy Lambda for GossipGirl Bedrock agent",
+  "dependencies": {
+    "@aws-sdk/client-bedrock-agent-runtime": "^3.787.0"
+  }
+}

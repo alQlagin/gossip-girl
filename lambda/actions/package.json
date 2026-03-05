@@ -1,0 +1,6 @@
+{
+  "name": "gossip-girl-actions",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Action group Lambda for GossipGirl Bedrock agent"
+}

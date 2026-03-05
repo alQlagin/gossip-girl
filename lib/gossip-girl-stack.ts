@@ -312,8 +312,8 @@ export class GossipGirlStack extends cdk.Stack {
         minify: true,
         sourceMap: false,
         target: 'es2020',
-        // AWS SDK v3 is available in Node.js 20.x Lambda runtime
-        externalModules: [],
+        // AWS SDK v3 is available in Node.js 20.x Lambda runtime — keep it external
+        externalModules: ['@aws-sdk/*'],
       },
     });
 

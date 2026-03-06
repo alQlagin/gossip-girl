@@ -156,7 +156,12 @@ export class GossipGirlStack extends cdk.Stack {
     // IAM: AgentCore Memory execution role
     // -----------------------------------------------------------------------
     const memoryRole = new iam.Role(this, 'MemoryRole', {
-      assumedBy: new iam.ServicePrincipal('bedrock.amazonaws.com'),
+      assumedBy: new iam.ServicePrincipal('bedrock-agentcore.amazonaws.com', {
+        conditions: {
+          StringEquals: { 'aws:SourceAccount': this.account },
+          ArnLike: { 'aws:SourceArn': `arn:aws:bedrock-agentcore:${this.region}:${this.account}:*` },
+        },
+      }),
       inlinePolicies: {
         MemoryPolicy: new iam.PolicyDocument({
           statements: [

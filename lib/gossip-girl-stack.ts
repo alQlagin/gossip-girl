@@ -181,30 +181,23 @@ export class GossipGirlStack extends cdk.Stack {
     const agentCoreMemory = new cdk.CfnResource(this, 'AgentCoreMemory', {
       type: 'AWS::BedrockAgentCore::Memory',
       properties: {
-        Name: 'gossip-girl-memory',
+        Name: 'gossipGirlMemory',
         Description: 'Two-strategy long-term memory for GossipGirl agent users',
         MemoryExecutionRoleArn: memoryRole.roleArn,
-        EventExpiryDuration: {
-          Unit: 'DAYS',
-          Value: 90,
-        },
+        EventExpiryDuration: 90,
         MemoryStrategies: [
           {
             // Captures structured interaction episodes per user
-            ExtractorType: 'EPISODIC_MEMORY',
-            Configuration: {
-              EpisodicMemoryConfiguration: {
-                EnableSummarization: true,
-              },
+            EpisodicMemoryStrategy: {
+              Name: 'EpisodicStrategy',
+              Namespaces: ['/strategies/{memoryStrategyId}/actors/{actorId}/sessions/{sessionId}/'],
             },
           },
           {
             // Extracts and persists factual knowledge per user
-            ExtractorType: 'SEMANTIC_MEMORY',
-            Configuration: {
-              SemanticMemoryConfiguration: {
-                EnableSummarization: true,
-              },
+            SemanticMemoryStrategy: {
+              Name: 'SemanticStrategy',
+              Namespaces: ['/strategies/{memoryStrategyId}/actors/{actorId}/'],
             },
           },
         ],

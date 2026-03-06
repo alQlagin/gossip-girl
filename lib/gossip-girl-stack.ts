@@ -180,7 +180,7 @@ export class GossipGirlStack extends cdk.Stack {
     });
 
     // -----------------------------------------------------------------------
-    // BedrockAgentCore Memory — episodic + semantic, 90-day retention
+    // BedrockAgentCore Memory — summary + semantic, 90-day retention
     // Level 2: user/actor-scoped long-term memory (accessed via memoryId = user_id)
     // -----------------------------------------------------------------------
     const agentCoreMemory = new cdk.CfnResource(this, 'AgentCoreMemory', {
@@ -192,17 +192,17 @@ export class GossipGirlStack extends cdk.Stack {
         EventExpiryDuration: 90,
         MemoryStrategies: [
           {
-            // Captures structured interaction episodes per user
-            EpisodicMemoryStrategy: {
-              Name: 'EpisodicStrategy',
-              Namespaces: ['/strategies/{memoryStrategyId}/actors/{actorId}/sessions/{sessionId}/'],
+            // Compresses session conversations into concise summaries per user/session
+            SummaryMemoryStrategy: {
+              Name: 'SummaryStrategy',
+              Namespaces: ['/summaries/{actorId}/{sessionId}/'],
             },
           },
           {
             // Extracts and persists factual knowledge per user
             SemanticMemoryStrategy: {
               Name: 'SemanticStrategy',
-              Namespaces: ['/strategies/{memoryStrategyId}/actors/{actorId}/'],
+              Namespaces: ['/facts/{actorId}/'],
             },
           },
         ],

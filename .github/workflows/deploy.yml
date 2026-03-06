@@ -41,9 +41,6 @@ jobs:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION || 'eu-central-1' }}
 
-      - name: CDK Bootstrap (idempotent)
-        run: npx cdk bootstrap
-
       - name: CDK Deploy
         run: npx cdk deploy --require-approval never --outputs-file cdk-outputs.json
 

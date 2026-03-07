@@ -70,7 +70,7 @@ export const handler = async (event: BedrockActionEvent): Promise<ActionResponse
     case '/get-agent-info':
       return buildResponse(actionGroup, apiPath, httpMethod, 200, {
         name: 'GossipGirlAgent',
-        model: 'anthropic.claude-3-5-haiku-20241022-v1:0',
+        model: 'eu.anthropic.claude-3-5-haiku-20241022-v1:0',
         version: '1.0.0',
         description: 'AI agent with two-level memory: session (L1) and user/actor (L2)',
       });

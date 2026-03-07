@@ -8,7 +8,7 @@ import * as logs from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
 import * as path from 'path';
 
-const CLAUDE_3_5_HAIKU_MODEL_ID = 'anthropic.claude-3-haiku-20240307-v1:0';
+const CLAUDE_3_5_HAIKU_MODEL_ID = 'eu.anthropic.claude-3-haiku-20240307-v1:0';
 
 // OpenAPI schema defining the action group operations
 const ACTION_GROUP_SCHEMA = JSON.stringify({
@@ -139,7 +139,8 @@ export class GossipGirlStack extends cdk.Stack {
             new iam.PolicyStatement({
               actions: ['bedrock:InvokeModel', 'bedrock:InvokeModelWithResponseStream'],
               resources: [
-                `arn:aws:bedrock:${this.region}::foundation-model/anthropic.claude-3-haiku-20240307-v1:0`,
+                `arn:aws:bedrock:*::foundation-model/anthropic.claude-3-haiku-20240307-v1:0`,
+                `arn:aws:bedrock:*:${this.account}:inference-profile/eu.anthropic.claude-3-haiku-20240307-v1:0`,
               ],
             }),
             // Allow invoking the action Lambda

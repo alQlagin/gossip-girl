@@ -135,11 +135,14 @@ export class GossipGirlStack extends cdk.Stack {
       inlinePolicies: {
         BedrockAgentPolicy: new iam.PolicyDocument({
           statements: [
-            // Allow invoking the foundation model
+            // Allow invoking the foundation model via cross-region inference profile
             new iam.PolicyStatement({
-              actions: ['bedrock:InvokeModel'],
+              actions: ['bedrock:InvokeModel', 'bedrock:InvokeModelWithResponseStream'],
               resources: [
+                // Base foundation model in any region (cross-region routing)
                 `arn:aws:bedrock:*::foundation-model/anthropic.claude-3-5-haiku-20241022-v1:0`,
+                // Cross-region inference profile in home region
+                `arn:aws:bedrock:${this.region}:${this.account}:inference-profile/eu.anthropic.claude-3-5-haiku-20241022-v1:0`,
               ],
             }),
             // Allow invoking the action Lambda

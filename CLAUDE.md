@@ -48,4 +48,4 @@ curl -X POST https://fidzpa6vm6.execute-api.eu-central-1.amazonaws.com/prod/chat
 
 ## Model
 
-`eu.anthropic.claude-3-5-haiku-20241022-v1:0` — cross-region inference profile (eu-central-1)
+`anthropic.claude-3-haiku-20240307-v1:0` — Claude 3 Haiku (eu-central-1)

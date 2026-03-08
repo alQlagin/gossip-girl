@@ -111,23 +111,4 @@ curl "https://api.telegram.org/bot${BOT_TOKEN}/getWebhookInfo"
 
 ## Redeploying after changes
 
-After changing `foundationModel` in the stack, CDK auto-prepares a new agent version but does **not** update the alias routing. Check and fix manually if needed:
-
-```bash
-AGENT_ID="<AgentId output>"
-ALIAS_ID="<AgentAliasId output>"
-
-# Check which version the alias targets and what model it uses
-aws bedrock-agent get-agent-alias --agent-id $AGENT_ID --agent-alias-id $ALIAS_ID \
-  --region eu-central-1 --query "agentAlias.routingConfiguration"
-
-aws bedrock-agent get-agent-version --agent-id $AGENT_ID --agent-version <N> \
-  --region eu-central-1 --query "agentVersion.foundationModel"
-
-# Update alias to point to the correct version
-aws bedrock-agent update-agent-alias \
-  --agent-id $AGENT_ID --agent-alias-id $ALIAS_ID \
-  --agent-alias-name live \
-  --routing-configuration agentVersion=<N> \
-  --region eu-central-1
-```
+After changing `foundationModel` in the stack, run `npx cdk deploy`. The alias routing is managed automatically via `routingConfiguration: [{ agentVersion: bedrockAgent.attrAgentVersion }]` in the CDK stack, so it will point to the newly prepared version after each deployment.

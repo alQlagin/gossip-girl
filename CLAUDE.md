@@ -32,13 +32,11 @@ npx cdk deploy
 
 ## Model
 
-`eu.anthropic.claude-3-haiku-20240307-v1:0` — EU cross-region inference profile (routes across eu-central-1, eu-west-1, eu-west-3)
+`eu.anthropic.claude-sonnet-4-5-20250929-v1:0` — EU cross-region inference profile (routes across eu-central-1, eu-west-1, eu-west-3)
 
 ## Known gotchas
 
 - **Model access must be accepted** before the agent can invoke any Anthropic model. See [docs/SETUP.md](docs/SETUP.md) Step 2.
 
-- **Agent alias must point to a version prepared with the correct model.** After changing `foundationModel` in the stack, CDK auto-prepares a new version but does NOT update the alias routing. See [docs/SETUP.md](docs/SETUP.md) — Redeploying section.
-
 - **IAM policy for system-defined cross-region inference profiles** must include the account ID (not `::`) in the resource ARN:
-  `arn:aws:bedrock:*:${account}:inference-profile/eu.anthropic.claude-3-haiku-20240307-v1:0`
+  `arn:aws:bedrock:*:${account}:inference-profile/eu.anthropic.claude-sonnet-4-5-20250929-v1:0`

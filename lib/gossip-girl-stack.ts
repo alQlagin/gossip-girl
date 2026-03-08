@@ -410,6 +410,12 @@ export class GossipGirlStack extends cdk.Stack {
       agentId: bedrockAgent.attrAgentId,
       agentAliasName: 'live',
       description: 'Production alias for GossipGirl agent',
+      // Explicitly route to the version prepared by the current deployment so that
+      // alias routing is updated automatically whenever foundationModel changes.
+      // Without this, CDK auto-prepares a new version on model changes but leaves
+      // the alias pointing to the old version, causing AccessDeniedException because
+      // the IAM policy only allows the new model's ARNs.
+      routingConfiguration: [{ agentVersion: bedrockAgent.attrAgentVersion }],
     });
 
     bedrockAgentAlias.addDependency(bedrockAgent);

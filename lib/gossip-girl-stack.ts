@@ -11,7 +11,7 @@ import * as path from 'path';
 
 const BOT_USERNAME = 'gossip_girl_ai_bot'; // Set to your bot's @username (without @)
 
-const CLAUDE_3_5_HAIKU_MODEL_ID = 'eu.anthropic.claude-3-haiku-20240307-v1:0';
+const CLAUDE_3_5_HAIKU_MODEL_ID = 'eu.anthropic.claude-sonnet-4-5-20250929-v1:0';
 
 // OpenAPI schema defining the action group operations
 const ACTION_GROUP_SCHEMA = JSON.stringify({
@@ -282,8 +282,8 @@ export class GossipGirlStack extends cdk.Stack {
             new iam.PolicyStatement({
               actions: ['bedrock:InvokeModel', 'bedrock:InvokeModelWithResponseStream'],
               resources: [
-                `arn:aws:bedrock:*::foundation-model/anthropic.claude-3-haiku-20240307-v1:0`,
-                `arn:aws:bedrock:*:${this.account}:inference-profile/eu.anthropic.claude-3-haiku-20240307-v1:0`,
+                `arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-5-20250929-v1:0`,
+                `arn:aws:bedrock:*:${this.account}:inference-profile/eu.anthropic.claude-sonnet-4-5-20250929-v1:0`,
               ],
             }),
             // Allow invoking the action Lambda

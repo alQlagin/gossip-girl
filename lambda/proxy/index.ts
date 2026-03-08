@@ -14,6 +14,11 @@
  * Memory levels:
  *   L1 (session):      Bedrock Agent SESSION_SUMMARY — scoped by sessionId
  *   L2 (user/actor):   AgentCore Memory (episodic + semantic) — scoped by memoryId = user_id
+ *
+ * Session enforcement:
+ *   All sessions must be pre-registered in DynamoDB with status="allowed".
+ *   Unknown or blocked sessions receive 403. Seed the first session manually via:
+ *     aws dynamodb put-item --table-name GossipGirlSessions ...
  */
 
 import {
@@ -21,11 +26,16 @@ import {
   InvokeAgentCommand,
   InvokeAgentCommandOutput,
 } from '@aws-sdk/client-bedrock-agent-runtime';
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { DynamoDBDocumentClient, GetCommand } from '@aws-sdk/lib-dynamodb';
 
 const client = new BedrockAgentRuntimeClient({});
+const ddbClient = new DynamoDBClient({});
+const ddb = DynamoDBDocumentClient.from(ddbClient);
 
 const AGENT_ID = process.env.AGENT_ID!;
 const AGENT_ALIAS_ID = process.env.AGENT_ALIAS_ID!;
+const SESSION_TABLE_NAME = process.env.SESSION_TABLE_NAME!;
 
 interface RequestBody {
   message?: string;
@@ -53,6 +63,14 @@ function response(statusCode: number, body: Record<string, unknown>): ApiGateway
     },
     body: JSON.stringify(body),
   };
+}
+
+async function checkSession(sessionId: string): Promise<{ status?: string } | null> {
+  const result = await ddb.send(new GetCommand({
+    TableName: SESSION_TABLE_NAME,
+    Key: { PK: `SESSION#${sessionId}`, SK: 'METADATA' },
+  }));
+  return (result.Item as { status?: string } | undefined) ?? null;
 }
 
 async function collectAgentResponse(stream: InvokeAgentCommandOutput['completion']): Promise<string> {
@@ -83,6 +101,12 @@ export const handler = async (event: ApiGatewayEvent): Promise<ApiGatewayRespons
   }
   if (!user_id || typeof user_id !== 'string' || user_id.trim() === '') {
     return response(400, { error: 'user_id is required — it identifies the actor and scopes long-term (L2) memory' });
+  }
+
+  // Session allowlist enforcement — reject unknown or blocked sessions
+  const sessionItem = await checkSession(session_id);
+  if (!sessionItem || sessionItem.status !== 'allowed') {
+    return response(403, { error: 'Session not allowed', session_id });
   }
 
   try {

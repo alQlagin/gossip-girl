@@ -2,11 +2,14 @@ import * as cdk from 'aws-cdk-lib';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as lambdaNodejs from 'aws-cdk-lib/aws-lambda-nodejs';
-import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as bedrock from 'aws-cdk-lib/aws-bedrock';
 import * as logs from 'aws-cdk-lib/aws-logs';
+import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
+import * as ssm from 'aws-cdk-lib/aws-ssm';
 import { Construct } from 'constructs';
 import * as path from 'path';
+
+const BOT_USERNAME = 'gossip_girl_ai_bot'; // Set to your bot's @username (without @)
 
 const CLAUDE_3_5_HAIKU_MODEL_ID = 'eu.anthropic.claude-3-haiku-20240307-v1:0';
 
@@ -84,12 +87,144 @@ const ACTION_GROUP_SCHEMA = JSON.stringify({
         },
       },
     },
+    '/allow-session': {
+      post: {
+        operationId: 'allowSession',
+        summary: 'Allow a session to use the agent',
+        description: 'Registers a session as allowed in the allowlist',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['session_id', 'user_id'],
+                properties: {
+                  session_id: { type: 'string', description: 'Session UUID to allow' },
+                  user_id: { type: 'string', description: 'Owner user ID' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Session allowed',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    session_id: { type: 'string' },
+                    user_id: { type: 'string' },
+                    status: { type: 'string' },
+                    message: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/block-session': {
+      post: {
+        operationId: 'blockSession',
+        summary: 'Block a session from using the agent',
+        description: 'Marks a session as blocked in the allowlist',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['session_id'],
+                properties: {
+                  session_id: { type: 'string', description: 'Session UUID to block' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Session blocked',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    session_id: { type: 'string' },
+                    status: { type: 'string' },
+                    message: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/list-allowed-sessions': {
+      post: {
+        operationId: 'listAllowedSessions',
+        summary: 'List allowed sessions',
+        description: 'Returns all sessions with status=allowed, optionally filtered by user_id',
+        requestBody: {
+          required: false,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  user_id: { type: 'string', description: 'Optional user ID filter' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'List of allowed sessions',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    sessions: { type: 'array', items: { type: 'object' } },
+                    count: { type: 'integer' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
   },
 });
 
 export class GossipGirlStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
+
+    // -----------------------------------------------------------------------
+    // DynamoDB: Session allowlist (single table design)
+    // -----------------------------------------------------------------------
+    const sessionTable = new dynamodb.Table(this, 'SessionTable', {
+      tableName: 'GossipGirl',
+      partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+
+    sessionTable.addGlobalSecondaryIndex({
+      indexName: 'UserSessionsIndex',
+      partitionKey: { name: 'user_id', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'created_at', type: dynamodb.AttributeType.STRING },
+      projectionType: dynamodb.ProjectionType.ALL,
+    });
 
     // -----------------------------------------------------------------------
     // IAM: Action Lambda role
@@ -113,12 +248,20 @@ export class GossipGirlStack extends cdk.Stack {
       role: actionLambdaRole,
       timeout: cdk.Duration.seconds(30),
       logRetention: logs.RetentionDays.ONE_WEEK,
+      environment: {
+        SESSION_TABLE_NAME: sessionTable.tableName,
+      },
       bundling: {
         minify: true,
         sourceMap: false,
         target: 'es2020',
+        // AWS SDK v3 is available in Node.js 20.x Lambda runtime — keep it external
+        externalModules: ['@aws-sdk/*'],
       },
     });
+
+    // Action Lambda needs full CRUD on the session table for allowlist management
+    sessionTable.grantReadWriteData(actionLambda);
 
     // Allow Bedrock to invoke the action Lambda
     actionLambda.addPermission('BedrockInvokePermission', {
@@ -234,6 +377,11 @@ export class GossipGirlStack extends cdk.Stack {
         'Always be concise, accurate, and warm in your responses.',
         'Use the get_current_datetime action when the user asks about the time or date.',
         'Use the get_agent_info action when asked about yourself.',
+        'You manage a session allowlist stored in DynamoDB.',
+        'Use allow_session to register a new session as permitted (requires session_id and user_id).',
+        'Use block_session to revoke access for a session (requires session_id).',
+        'Use list_allowed_sessions to show active sessions, optionally filtered by user_id.',
+        'Only perform session management actions when explicitly instructed by the user.',
       ].join(' '),
       memoryConfiguration: {
         enabledMemoryTypes: ['SESSION_SUMMARY'],
@@ -242,7 +390,7 @@ export class GossipGirlStack extends cdk.Stack {
       actionGroups: [
         {
           actionGroupName: 'GossipGirlActions',
-          description: 'Utility actions: get current datetime and agent info',
+          description: 'Utility actions: datetime, agent info, and session allowlist management',
           actionGroupExecutor: {
             lambda: actionLambda.functionArn,
           },
@@ -268,87 +416,98 @@ export class GossipGirlStack extends cdk.Stack {
     bedrockAgentAlias.addDependency(bedrockAgent);
 
     // -----------------------------------------------------------------------
-    // IAM: Proxy Lambda role
+    // SSM: Webhook secret (non-sensitive, looked up at synth time)
+    // Store with: aws ssm put-parameter --name /gossip-girl/telegram-webhook-secret
+    //             --value "<SECRET>" --type String --region eu-central-1
     // -----------------------------------------------------------------------
-    const proxyLambdaRole = new iam.Role(this, 'ProxyLambdaRole', {
-      assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
-      managedPolicies: [
-        iam.ManagedPolicy.fromAwsManagedPolicyName(
-          'service-role/AWSLambdaBasicExecutionRole',
-        ),
-      ],
-      inlinePolicies: {
-        InvokeAgentPolicy: new iam.PolicyDocument({
-          statements: [
-            new iam.PolicyStatement({
-              actions: ['bedrock:InvokeAgent'],
-              resources: [
-                `arn:aws:bedrock:${this.region}:${this.account}:agent-alias/${bedrockAgent.attrAgentId}/${bedrockAgentAlias.attrAgentAliasId}`,
-              ],
-            }),
-          ],
-        }),
-      },
-    });
+    const webhookSecret = ssm.StringParameter.valueForStringParameter(
+      this, '/gossip-girl/telegram-webhook-secret',
+    );
 
     // -----------------------------------------------------------------------
-    // Lambda: API Gateway proxy
-    // Accepts { message, user_id, session_id? } and invokes the Bedrock agent
+    // Lambda: Telegram processor — calls Bedrock, sends reply via Bot API
     // -----------------------------------------------------------------------
-    const proxyLambda = new lambdaNodejs.NodejsFunction(this, 'ProxyLambda', {
-      entry: path.join(__dirname, '../lambda/proxy/index.ts'),
+    const processorLambda = new lambdaNodejs.NodejsFunction(this, 'TelegramProcessorLambda', {
+      entry: path.join(__dirname, '../lambda/telegram/processor/index.ts'),
       handler: 'handler',
       runtime: lambda.Runtime.NODEJS_20_X,
-      role: proxyLambdaRole,
-      timeout: cdk.Duration.seconds(60),
+      timeout: cdk.Duration.seconds(90),
       logRetention: logs.RetentionDays.ONE_WEEK,
       environment: {
         AGENT_ID: bedrockAgent.attrAgentId,
         AGENT_ALIAS_ID: bedrockAgentAlias.attrAgentAliasId,
-        MEMORY_ID: memoryId,
+        SESSION_TABLE_NAME: sessionTable.tableName,
+        BOT_TOKEN_PARAM: '/gossip-girl/telegram-bot-token',
       },
       bundling: {
         minify: true,
         sourceMap: false,
         target: 'es2020',
-        // AWS SDK v3 is available in Node.js 20.x Lambda runtime — keep it external
         externalModules: ['@aws-sdk/*'],
       },
     });
 
+    sessionTable.grantReadWriteData(processorLambda);
+
+    processorLambda.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['bedrock:InvokeAgent'],
+      resources: [
+        `arn:aws:bedrock:${this.region}:${this.account}:agent-alias/${bedrockAgent.attrAgentId}/${bedrockAgentAlias.attrAgentAliasId}`,
+      ],
+    }));
+
+    processorLambda.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['ssm:GetParameter'],
+      resources: [
+        `arn:aws:ssm:${this.region}:${this.account}:parameter/gossip-girl/telegram-bot-token`,
+      ],
+    }));
+
     // -----------------------------------------------------------------------
-    // API Gateway — open (no auth), internet-accessible REST API
-    // POST /chat → ProxyLambda
+    // Lambda: Telegram webhook receiver — validates secret, fires async invoke
     // -----------------------------------------------------------------------
-    const api = new apigateway.RestApi(this, 'GossipGirlApi', {
-      restApiName: 'GossipGirlApi',
-      description: 'Internet-facing endpoint for the GossipGirl Bedrock agent',
-      endpointConfiguration: {
-        types: [apigateway.EndpointType.REGIONAL],
+    const webhookLambda = new lambdaNodejs.NodejsFunction(this, 'TelegramWebhookLambda', {
+      entry: path.join(__dirname, '../lambda/telegram/webhook/index.ts'),
+      handler: 'handler',
+      runtime: lambda.Runtime.NODEJS_20_X,
+      timeout: cdk.Duration.seconds(10),
+      logRetention: logs.RetentionDays.ONE_WEEK,
+      environment: {
+        PROCESSOR_FUNCTION_ARN: processorLambda.functionArn,
+        WEBHOOK_SECRET: webhookSecret,
+        BOT_USERNAME: BOT_USERNAME,
       },
-      defaultMethodOptions: {
-        authorizationType: apigateway.AuthorizationType.NONE,
-      },
-      deployOptions: {
-        stageName: 'prod',
-        throttlingRateLimit: 10,
-        throttlingBurstLimit: 20,
+      bundling: {
+        minify: true,
+        sourceMap: false,
+        target: 'es2020',
+        externalModules: ['@aws-sdk/*'],
       },
     });
 
-    const chatResource = api.root.addResource('chat');
-    chatResource.addMethod(
-      'POST',
-      new apigateway.LambdaIntegration(proxyLambda, { proxy: true }),
-    );
+    webhookLambda.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['lambda:InvokeFunction'],
+      resources: [processorLambda.functionArn],
+    }));
+
+    // -----------------------------------------------------------------------
+    // Lambda Function URL — public HTTPS endpoint for Telegram webhook
+    // -----------------------------------------------------------------------
+    const webhookUrl = webhookLambda.addFunctionUrl({
+      authType: lambda.FunctionUrlAuthType.NONE,
+      cors: {
+        allowedOrigins: ['https://api.telegram.org'],
+        allowedMethods: [lambda.HttpMethod.POST],
+        allowedHeaders: ['content-type', 'x-telegram-bot-api-secret-token'],
+      },
+    });
 
     // -----------------------------------------------------------------------
     // Stack Outputs
     // -----------------------------------------------------------------------
-    new cdk.CfnOutput(this, 'ApiEndpoint', {
-      description: 'POST endpoint to chat with the agent: { message, user_id, session_id? }',
-      value: `${api.url}chat`,
-      exportName: 'GossipGirlApiEndpoint',
+    new cdk.CfnOutput(this, 'TelegramWebhookUrl', {
+      description: 'Register this URL with Telegram: setWebhook?url=<value>&secret_token=<WEBHOOK_SECRET>',
+      value: webhookUrl.url,
     });
 
     new cdk.CfnOutput(this, 'AgentId', {
@@ -364,6 +523,11 @@ export class GossipGirlStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'MemoryId', {
       description: 'AgentCore Memory ID for user-level (L2) long-term memory',
       value: memoryId,
+    });
+
+    new cdk.CfnOutput(this, 'SessionTableName', {
+      description: 'DynamoDB table name for session allowlist',
+      value: sessionTable.tableName,
     });
   }
 }

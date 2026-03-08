@@ -2,9 +2,26 @@
  * Action group Lambda handler for GossipGirl agent.
  *
  * Supported actions:
- *   - /get-current-datetime  → returns current UTC ISO timestamp
- *   - /get-agent-info        → returns agent metadata
+ *   - /get-current-datetime      → returns current UTC ISO timestamp
+ *   - /get-agent-info            → returns agent metadata
+ *   - /allow-session             → registers a session as allowed in DynamoDB
+ *   - /block-session             → marks a session as blocked in DynamoDB
+ *   - /list-allowed-sessions     → lists allowed sessions, optionally by user_id
  */
+
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import {
+  DynamoDBDocumentClient,
+  PutCommand,
+  UpdateCommand,
+  QueryCommand,
+  ScanCommand,
+} from '@aws-sdk/lib-dynamodb';
+
+const ddbClient = new DynamoDBClient({});
+const ddb = DynamoDBDocumentClient.from(ddbClient);
+
+const SESSION_TABLE_NAME = process.env.SESSION_TABLE_NAME!;
 
 interface BedrockActionEvent {
   actionGroup: string;
@@ -57,6 +74,15 @@ function buildResponse(
   };
 }
 
+function getProps(event: BedrockActionEvent): Record<string, string> {
+  const props: Record<string, string> = {};
+  const properties = event.requestBody?.content?.['application/json']?.properties ?? [];
+  for (const { name, value } of properties) {
+    props[name] = value;
+  }
+  return props;
+}
+
 export const handler = async (event: BedrockActionEvent): Promise<ActionResponse> => {
   const { actionGroup, apiPath, httpMethod } = event;
 
@@ -74,6 +100,89 @@ export const handler = async (event: BedrockActionEvent): Promise<ActionResponse
         version: '1.0.0',
         description: 'AI agent with two-level memory: session (L1) and user/actor (L2)',
       });
+
+    case '/allow-session': {
+      const { session_id, user_id } = getProps(event);
+      if (!session_id || !user_id) {
+        return buildResponse(actionGroup, apiPath, httpMethod, 400, {
+          error: 'session_id and user_id are required',
+        });
+      }
+      const now = new Date().toISOString();
+      await ddb.send(new PutCommand({
+        TableName: SESSION_TABLE_NAME,
+        Item: {
+          PK: `SESSION#${session_id}`,
+          SK: 'METADATA',
+          session_id,
+          user_id,
+          status: 'allowed',
+          created_at: now,
+          updated_at: now,
+          updated_by: user_id,
+        },
+      }));
+      return buildResponse(actionGroup, apiPath, httpMethod, 200, {
+        session_id,
+        user_id,
+        status: 'allowed',
+        message: `Session ${session_id} is now allowed for user ${user_id}`,
+      });
+    }
+
+    case '/block-session': {
+      const { session_id } = getProps(event);
+      if (!session_id) {
+        return buildResponse(actionGroup, apiPath, httpMethod, 400, {
+          error: 'session_id is required',
+        });
+      }
+      await ddb.send(new UpdateCommand({
+        TableName: SESSION_TABLE_NAME,
+        Key: { PK: `SESSION#${session_id}`, SK: 'METADATA' },
+        UpdateExpression: 'SET #status = :blocked, updated_at = :now',
+        ExpressionAttributeNames: { '#status': 'status' },
+        ExpressionAttributeValues: {
+          ':blocked': 'blocked',
+          ':now': new Date().toISOString(),
+        },
+      }));
+      return buildResponse(actionGroup, apiPath, httpMethod, 200, {
+        session_id,
+        status: 'blocked',
+        message: `Session ${session_id} has been blocked`,
+      });
+    }
+
+    case '/list-allowed-sessions': {
+      const { user_id } = getProps(event);
+      let sessions: Record<string, unknown>[];
+
+      if (user_id) {
+        const result = await ddb.send(new QueryCommand({
+          TableName: SESSION_TABLE_NAME,
+          IndexName: 'UserSessionsIndex',
+          KeyConditionExpression: 'user_id = :uid',
+          FilterExpression: '#status = :allowed',
+          ExpressionAttributeNames: { '#status': 'status' },
+          ExpressionAttributeValues: { ':uid': user_id, ':allowed': 'allowed' },
+        }));
+        sessions = (result.Items ?? []) as Record<string, unknown>[];
+      } else {
+        const result = await ddb.send(new ScanCommand({
+          TableName: SESSION_TABLE_NAME,
+          FilterExpression: '#status = :allowed',
+          ExpressionAttributeNames: { '#status': 'status' },
+          ExpressionAttributeValues: { ':allowed': 'allowed' },
+        }));
+        sessions = (result.Items ?? []) as Record<string, unknown>[];
+      }
+
+      return buildResponse(actionGroup, apiPath, httpMethod, 200, {
+        sessions,
+        count: sessions.length,
+      });
+    }
 
     default:
       return buildResponse(actionGroup, apiPath, httpMethod, 400, {

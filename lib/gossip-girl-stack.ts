@@ -409,9 +409,13 @@ export class GossipGirlStack extends cdk.Stack {
     // resource (creating a new version number) whenever foundationModel changes.
     // This ensures the alias routing below always targets the correct version.
     // -----------------------------------------------------------------------
-    const bedrockAgentVersion = new bedrock.CfnAgentVersion(this, 'BedrockAgentVersion', {
-      agentId: bedrockAgent.attrAgentId,
-      description: CLAUDE_3_5_HAIKU_MODEL_ID,
+    // CfnAgentVersion is not available in this CDK version — use CfnResource directly.
+    const bedrockAgentVersion = new cdk.CfnResource(this, 'BedrockAgentVersion', {
+      type: 'AWS::Bedrock::AgentVersion',
+      properties: {
+        AgentId: bedrockAgent.attrAgentId,
+        Description: CLAUDE_3_5_HAIKU_MODEL_ID,
+      },
     });
 
     bedrockAgentVersion.addDependency(bedrockAgent);
@@ -427,7 +431,7 @@ export class GossipGirlStack extends cdk.Stack {
       agentId: bedrockAgent.attrAgentId,
       agentAliasName: 'live',
       description: 'Production alias for GossipGirl agent',
-      routingConfiguration: [{ agentVersion: bedrockAgentVersion.attrAgentVersion }],
+      routingConfiguration: [{ agentVersion: bedrockAgentVersion.getAtt('AgentVersion').toString() }],
     });
 
     bedrockAgentAlias.addDependency(bedrockAgentVersion);

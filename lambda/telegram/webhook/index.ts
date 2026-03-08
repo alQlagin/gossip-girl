@@ -86,6 +86,10 @@ export const handler = async (event: FunctionUrlEvent) => {
     userId: message.from.id,
     text,
     messageId: message.message_id,
+    chatType: message.chat.type,
+    chatTitle: message.chat.title,
+    fromFirstName: message.from.first_name,
+    fromUsername: message.from.username,
   };
 
   // Fire-and-forget async invocation

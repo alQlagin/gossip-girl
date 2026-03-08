@@ -5,7 +5,7 @@ import {
 } from '@aws-sdk/client-bedrock-agent-runtime';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, GetCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
 import { sendMessage, sendChatAction } from '../shared/telegram-api';
 import { ProcessorPayload } from '../shared/types';
 
@@ -44,23 +44,60 @@ async function collectAgentResponse(stream: InvokeAgentCommandOutput['completion
   return text;
 }
 
-async function upsertSession(sessionId: string, userId: string): Promise<void> {
-  try {
-    await ddb.send(new PutCommand({
-      TableName: SESSION_TABLE_NAME,
-      Item: {
-        PK: `SESSION#${sessionId}`,
-        SK: 'METADATA',
-        user_id: userId,
-        created_at: new Date().toISOString(),
-        status: 'allowed',
-      },
-      ConditionExpression: 'attribute_not_exists(PK)',
-    }));
-  } catch (err: unknown) {
-    // Item already exists — that's fine
-    if ((err as { name?: string }).name !== 'ConditionalCheckFailedException') throw err;
-  }
+async function getSessionStatus(sessionId: string): Promise<'allowed' | 'blocked' | 'unknown'> {
+  const res = await ddb.send(new GetCommand({
+    TableName: SESSION_TABLE_NAME,
+    Key: { PK: `SESSION#${sessionId}`, SK: 'METADATA' },
+  }));
+  const status = res.Item?.status as string | undefined;
+  if (status === 'allowed') return 'allowed';
+  if (status === 'blocked') return 'blocked';
+  return 'unknown';
+}
+
+async function listAdminUserIds(): Promise<number[]> {
+  const res = await ddb.send(new QueryCommand({
+    TableName: SESSION_TABLE_NAME,
+    KeyConditionExpression: 'PK = :pk',
+    ExpressionAttributeValues: { ':pk': 'ADMINS' },
+  }));
+  return (res.Items ?? [])
+    .map(item => item.SK as string)
+    .map(sk => parseInt(sk.replace('tg-', ''), 10))
+    .filter(id => !isNaN(id));
+}
+
+async function notifyAdminsAccessRequest(
+  botToken: string,
+  payload: ProcessorPayload,
+): Promise<void> {
+  const adminIds = await listAdminUserIds();
+  if (adminIds.length === 0) return;
+
+  const { chatId, userId, chatType, chatTitle, fromFirstName, fromUsername } = payload;
+  const sessionId = `tg-${Math.abs(chatId)}`;
+  const userLink = `tg://user?id=${userId}`;
+  const displayName = fromUsername
+    ? `${fromFirstName} (@${fromUsername})`
+    : (fromFirstName ?? String(userId));
+  const chatDisplay = chatTitle
+    ?? (chatType === 'private' ? `Private chat with ${displayName}` : String(chatId));
+
+  const lines = [
+    '🔐 *Access Request*',
+    '',
+    `From: [${displayName}](${userLink})`,
+    `Chat: ${chatDisplay} \\(${chatType}\\)`,
+    `Chat ID: \`${chatId}\``,
+    `Session ID: \`${sessionId}\``,
+    '',
+    'To allow this chat, say:',
+    `_allow session ${sessionId} for user tg\\-${userId}_`,
+  ];
+
+  await Promise.allSettled(
+    adminIds.map(adminId => sendMessage(botToken, adminId, lines.join('\n'))),
+  );
 }
 
 export const handler = async (payload: ProcessorPayload): Promise<void> => {
@@ -77,12 +114,21 @@ export const handler = async (payload: ProcessorPayload): Promise<void> => {
     return;
   }
 
+  // Access control — deny by default
+  const status = await getSessionStatus(sessionId);
+  if (status !== 'allowed') {
+    await sendMessage(botToken, chatId, 'ask admin to grant you access to gossips', messageId);
+    if (status === 'unknown') {
+      // Notify admins about the access request (fire-and-forget)
+      notifyAdminsAccessRequest(botToken, payload).catch(err =>
+        console.error('Failed to notify admins:', err),
+      );
+    }
+    return;
+  }
+
   try {
-    // Fire typing indicator and upsert session in parallel
-    await Promise.all([
-      sendChatAction(botToken, chatId, 'typing'),
-      upsertSession(sessionId, memoryId),
-    ]);
+    await sendChatAction(botToken, chatId, 'typing');
 
     const result = await bedrockClient.send(new InvokeAgentCommand({
       agentId: AGENT_ID,
@@ -91,6 +137,9 @@ export const handler = async (payload: ProcessorPayload): Promise<void> => {
       memoryId,
       inputText: text,
       enableTrace: false,
+      sessionState: {
+        sessionAttributes: { requestorUserId: memoryId },
+      },
     }));
 
     const agentResponse = await collectAgentResponse(result.completion);

@@ -12,6 +12,7 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import {
   DynamoDBDocumentClient,
+  GetCommand,
   PutCommand,
   UpdateCommand,
   QueryCommand,
@@ -27,6 +28,7 @@ interface BedrockActionEvent {
   actionGroup: string;
   apiPath: string;
   httpMethod: string;
+  sessionAttributes?: Record<string, string>;
   requestBody?: {
     content?: {
       'application/json'?: {
@@ -74,6 +76,15 @@ function buildResponse(
   };
 }
 
+async function isAdmin(userId: string): Promise<boolean> {
+  if (!userId) return false;
+  const res = await ddb.send(new GetCommand({
+    TableName: SESSION_TABLE_NAME,
+    Key: { PK: 'ADMINS', SK: userId },
+  }));
+  return !!res.Item;
+}
+
 function getProps(event: BedrockActionEvent): Record<string, string> {
   const props: Record<string, string> = {};
   const properties = event.requestBody?.content?.['application/json']?.properties ?? [];
@@ -102,6 +113,12 @@ export const handler = async (event: BedrockActionEvent): Promise<ActionResponse
       });
 
     case '/allow-session': {
+      const requestorId = event.sessionAttributes?.requestorUserId ?? '';
+      if (!(await isAdmin(requestorId))) {
+        return buildResponse(actionGroup, apiPath, httpMethod, 403, {
+          error: 'Unauthorized. Only admins can allow sessions.',
+        });
+      }
       const { session_id, user_id } = getProps(event);
       if (!session_id || !user_id) {
         return buildResponse(actionGroup, apiPath, httpMethod, 400, {
@@ -131,6 +148,12 @@ export const handler = async (event: BedrockActionEvent): Promise<ActionResponse
     }
 
     case '/block-session': {
+      const requestorId = event.sessionAttributes?.requestorUserId ?? '';
+      if (!(await isAdmin(requestorId))) {
+        return buildResponse(actionGroup, apiPath, httpMethod, 403, {
+          error: 'Unauthorized. Only admins can block sessions.',
+        });
+      }
       const { session_id } = getProps(event);
       if (!session_id) {
         return buildResponse(actionGroup, apiPath, httpMethod, 400, {

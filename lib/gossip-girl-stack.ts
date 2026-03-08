@@ -404,21 +404,33 @@ export class GossipGirlStack extends cdk.Stack {
     bedrockAgent.addDependency(agentCoreMemory);
 
     // -----------------------------------------------------------------------
-    // Bedrock Agent Alias — "live" points to the prepared draft version
+    // Bedrock Agent Version — numbered snapshot of the prepared agent.
+    // description is tied to the model ID so CloudFormation replaces this
+    // resource (creating a new version number) whenever foundationModel changes.
+    // This ensures the alias routing below always targets the correct version.
+    // -----------------------------------------------------------------------
+    const bedrockAgentVersion = new bedrock.CfnAgentVersion(this, 'BedrockAgentVersion', {
+      agentId: bedrockAgent.attrAgentId,
+      description: CLAUDE_3_5_HAIKU_MODEL_ID,
+    });
+
+    bedrockAgentVersion.addDependency(bedrockAgent);
+
+    // -----------------------------------------------------------------------
+    // Bedrock Agent Alias — "live" points to the prepared version above.
+    // routingConfiguration is kept in sync automatically: when the model
+    // changes, BedrockAgentVersion is replaced (new version number), and
+    // this alias is updated to route to the new version, preventing the
+    // AccessDeniedException caused by a stale alias targeting an old model.
     // -----------------------------------------------------------------------
     const bedrockAgentAlias = new bedrock.CfnAgentAlias(this, 'BedrockAgentAlias', {
       agentId: bedrockAgent.attrAgentId,
       agentAliasName: 'live',
       description: 'Production alias for GossipGirl agent',
-      // Explicitly route to the version prepared by the current deployment so that
-      // alias routing is updated automatically whenever foundationModel changes.
-      // Without this, CDK auto-prepares a new version on model changes but leaves
-      // the alias pointing to the old version, causing AccessDeniedException because
-      // the IAM policy only allows the new model's ARNs.
-      routingConfiguration: [{ agentVersion: bedrockAgent.attrAgentVersion }],
+      routingConfiguration: [{ agentVersion: bedrockAgentVersion.attrAgentVersion }],
     });
 
-    bedrockAgentAlias.addDependency(bedrockAgent);
+    bedrockAgentAlias.addDependency(bedrockAgentVersion);
 
     // -----------------------------------------------------------------------
     // SSM: Webhook secret (non-sensitive, looked up at synth time)

@@ -23,13 +23,19 @@ Complete setup instructions for deploying the GossipGirl Telegram bot.
 Run once per AWS account/region:
 
 ```bash
+
+
+# anthropic.claude-sonnet-4-6
+# anthropic.claude-sonnet-4-5-20250929-v1:0
+# anthropic.claude-haiku-4-5-20251001-v1:0
+MODEL_ID=anthropic.claude-haiku-4-5-20251001-v1:0
 OFFER_TOKEN=$(aws bedrock list-foundation-model-agreement-offers \
-  --model-id anthropic.claude-3-haiku-20240307-v1:0 \
+  --model-id $MODEL_ID \
   --region eu-central-1 \
   --query "offers[0].offerToken" --output text)
 
 aws bedrock create-foundation-model-agreement \
-  --model-id anthropic.claude-3-haiku-20240307-v1:0 \
+  --model-id $MODEL_ID \
   --offer-token "$OFFER_TOKEN" \
   --region eu-central-1
 ```

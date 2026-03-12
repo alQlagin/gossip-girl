@@ -11,7 +11,7 @@ import * as path from 'path';
 
 const BOT_USERNAME = 'gossip_girl_ai_bot'; // Set to your bot's @username (without @)
 
-const CLAUDE_3_5_HAIKU_MODEL_ID = 'eu.anthropic.claude-sonnet-4-5-20250929-v1:0';
+const CLAUDE_HAIKU_MODEL_ID = 'anthropic.claude-haiku-4-5-20251001-v1:0';
 
 // OpenAPI schema defining the action group operations
 const ACTION_GROUP_SCHEMA = JSON.stringify({
@@ -364,7 +364,7 @@ export class GossipGirlStack extends cdk.Stack {
       agentName: 'GossipGirlAgent',
       description: 'AI agent with two-level memory: session (L1) and user/actor (L2)',
       agentResourceRoleArn: agentRole.roleArn,
-      foundationModel: CLAUDE_3_5_HAIKU_MODEL_ID,
+      foundationModel: CLAUDE_HAIKU_MODEL_ID,
       idleSessionTtlInSeconds: 1800,
       autoPrepare: true,
       instruction: [
